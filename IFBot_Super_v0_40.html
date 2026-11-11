@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IFBot Super v0.40</title>
+<style>
+:root{color-scheme:dark;font-family:Arial,sans-serif;background:#10151d;color:#edf2f7}
+body{margin:0;padding:14px;max-width:900px;margin:auto}
+h1{font-size:24px;margin:4px 0}.sub{color:#9eacbd;font-size:13px;line-height:1.45}
+.panel{background:#1a2431;border:1px solid #314155;border-radius:13px;padding:13px;margin:12px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{background:#2476d2;color:white;border:0;border-radius:9px;padding:11px 14px;font-weight:bold}
+button.secondary{background:#405064}input,select,textarea{background:#0e1722;color:#eef;border:1px solid #43536a;border-radius:8px;padding:9px;max-width:100%}
+textarea{width:100%;min-height:90px;box-sizing:border-box}
+label{font-size:14px;display:inline-flex;gap:6px;align-items:center;margin:6px 12px 6px 0}
+.metric{font-size:13px;color:#aab8c8}.big{font-size:26px;font-weight:bold}.good{color:#58d69b}.bad{color:#ff9c85}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}
+.tile{background:#101923;border-radius:9px;padding:10px}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px;border-bottom:1px solid #344255;text-align:left}
+.small{font-size:12px;color:#aab8c8}.warn{color:#ffc66d}
+</style></head>
+<body>
+<h1>IFBot Super v0.40</h1>
+<div class="sub">Модульный анализатор Pocket Option OTC · M1 · только сигналы · без автоторговли и без подключения к аккаунту.</div>
+<div class="panel">
+ <div class="row"><strong>Данные свечей (CSV)</strong><span class="small">Формат: time,open,high,low,close</span></div>
+ <input type="file" id="file" accept=".csv,.txt">
+ <textarea id="csv" placeholder="Вставь сюда исторические свечи CSV: time,open,high,low,close"></textarea>
+ <div class="row">
+  <label><input type="checkbox" id="closed" checked> Последняя строка — закрытая свеча</label>
+  <button id="load">Загрузить и рассчитать</button><button class="secondary" id="demo">Тестовый пример</button>
+ </div>
+ <div class="small warn">Если последняя свеча ещё формируется — сними галочку. Бот исключит её из анализа.</div>
+</div>
+<div class="panel">
+ <strong>Стратегии — можно включать и отключать</strong>
+ <div class="grid" id="strategies">
+  <div class="tile"><label><input type="checkbox" data-s="trend" checked> EMA trend + RSI</label><div class="small">Направление тренда</div></div>
+  <div class="tile"><label><input type="checkbox" data-s="macd" checked> MACD</label><div class="small">Импульс</div></div>
+  <div class="tile"><label><input type="checkbox" data-s="bb" checked> Bollinger</label><div class="small">Возврат от края</div></div>
+  <div class="tile"><label><input type="checkbox" data-s="stoch" checked> Stochastic</label><div class="small">Перекупленность/перепроданность</div></div>
+  <div class="tile"><label><input type="checkbox" data-s="candle" checked> Свечная модель</label><div class="small">Поглощение / хвост</div></div>
+  <div class="tile"><label><input type="checkbox" data-s="momentum" checked> Momentum</label><div class="small">Сила движения</div></div>
+ </div>
+ <div class="row"><label>Минимум совпадений <select id="threshold"><option>3</option><option selected>4</option><option>5</option><option>6</option></select></label>
+ <label>Минимум свечей <select id="bars"><option>60</option><option selected>100</option><option>150</option></select></label></div>
+</div>
+<div class="panel">
+ <div class="metric">Текущий вывод</div><div class="big" id="signal">ПРОПУСК</div>
+ <div id="reason" class="sub">Загрузи закрытые свечи для анализа.</div>
+ <div class="grid" style="margin-top:10px">
+  <div class="tile"><div class="metric">Совпадения BUY</div><div class="big" id="bull">—</div></div>
+  <div class="tile"><div class="metric">Совпадения SELL</div><div class="big" id="bear">—</div></div>
+  <div class="tile"><div class="metric">Свечей</div><div class="big" id="count">0</div></div>
+  <div class="tile"><div class="metric">Статус</div><div id="status">Нет данных</div></div>
+ </div>
+</div>
+<div class="panel">
+ <strong>Историческая проверка (следующая свеча)</strong>
+ <div class="sub">Проверяет сигналы на загруженной истории без подглядывания в будущую свечу. Это не прогноз и не гарантия; выплаты брокера и задержка исполнения не учитываются.</div>
+ <div class="grid" style="margin-top:10px">
+  <div class="tile"><div class="metric">Сигналов</div><div class="big" id="trades">0</div></div>
+  <div class="tile"><div class="metric">Угадано</div><div class="big" id="wins">0</div></div>
+  <div class="tile"><div class="metric">Доля совпадений</div><div class="big" id="rate">—</div></div>
+  <div class="tile"><div class="metric">Пропуски</div><div class="big" id="skips">0</div></div>
+ </div><div id="testmsg" class="small"></div>
+</div>
+<div class="panel">
+ <strong>Контроль качества</strong>
+ <ul class="small">
+ <li>Нет свечей / недостаточно истории — ПРОПУСК.</li>
+ <li>Отключённые модули не участвуют в голосовании.</li>
+ <li>При равенстве BUY и SELL — ПРОПУСК.</li>
+ <li>Нет живого потока — не выдаёт сигнал как актуальный.</li>
+ <li>Никаких ставок, Martingale или автоматических нажатий.</li>
+ </ul>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+let data=[];
+function parseCSV(t){
+ const lines=t.trim().split(/\r?\n/).filter(Boolean), out=[];
+ for(let i=0;i<lines.length;i++){
+  let p=lines[i].split(/[;,\t]/).map(x=>x.trim().replace(/^["']|["']$/g,''));
+  if(i===0 && /open/i.test(p[1]||'')) continue;
+  if(p.length<5) continue;
+  let n=p.slice(1,5).map(Number);
+  if(n.every(Number.isFinite)&&n[0]>0&&n[1]>=Math.max(n[0],n[3])&&n[2]<=Math.min(n[0],n[3])&&n[3]>0) out.push({time:p[0],o:n[0],h:n[1],l:n[2],c:n[3]});
+ }
+ return out;
+}
+function ema(a,p){let r=Array(a.length).fill(null);if(a.length<p)return r;let v=a.slice(0,p).reduce((x,y)=>x+y,0)/p;r[p-1]=v;let k=2/(p+1);for(let i=p;i<a.length;i++){v=a[i]*k+v*(1-k);r[i]=v}return r}
+function rsi(a,p=14){let r=Array(a.length).fill(null);if(a.length<=p)return r;let g=0,l=0;for(let i=1;i<=p;i++){let d=a[i]-a[i-1];g+=Math.max(0,d);l+=Math.max(0,-d)}g/=p;l/=p;r[p]=l===0?100:100-100/(1+g/l);for(let i=p+1;i<a.length;i++){let d=a[i]-a[i-1];g=(g*(p-1)+Math.max(0,d))/p;l=(l*(p-1)+Math.max(0,-d))/p;r[i]=l===0?100:100-100/(1+g/l)}return r}
+function std(a){let m=a.reduce((x,y)=>x+y,0)/a.length;return Math.sqrt(a.reduce((x,y)=>x+(y-m)**2,0)/a.length)}
+function calc(a,end){
+ let c=a.slice(0,end+1).map(x=>x.c), e9=ema(c,9),e21=ema(c,21),e50=ema(c,50),rr=rsi(c,14);
+ let i=c.length-1, score=0, reasons=[], votes={};
+ const enabled=[...document.querySelectorAll('[data-s]:checked')].map(x=>x.dataset.s);
+ const put=(name,v,why)=>{if(!enabled.includes(name))return;votes[name]=v;if(v){score+=v;reasons.push(why)}};
+ // Trend requires aligned EMA stack and RSI confirmation
+ let trend=e9[i]!=null&&e21[i]!=null&&e50[i]!=null?(e9[i]>e21[i]&&e21[i]>e50[i]&&rr[i]>52?1:e9[i]<e21[i]&&e21[i]<e50[i]&&rr[i]<48?-1:0):0;
+ put('trend',trend,trend>0?'EMA trend вверх + RSI подтверждает':trend<0?'EMA trend вниз + RSI подтверждает':'');
+ let m12=ema(c,12),m26=ema(c,26),mac=m12.map((v,j)=>v==null||m26[j]==null?null:v-m26[j]),sig=ema(mac.map(x=>x??0),9);
+ let mv=mac[i]!=null&&sig[i]!=null?(mac[i]>sig[i]&&mac[i]>0?1:mac[i]<sig[i]&&mac[i]<0?-1:0):0;
+ put('macd',mv,mv>0?'MACD импульс вверх':mv<0?'MACD импульс вниз':'');
+ let bb=0;if(i>=19){let arr=c.slice(i-19,i+1),mid=arr.reduce((x,y)=>x+y,0)/20,sd=std(arr);bb=c[i]<mid-2*sd?1:c[i]>mid+2*sd?-1:0}
+ put('bb',bb,bb>0?'Цена ниже нижней полосы Bollinger':bb<0?'Цена выше верхней полосы Bollinger':'');
+ let st=0;if(i>=13){let hh=Math.max(...a.slice(end-13,end+1).map(x=>x.h)),ll=Math.min(...a.slice(end-13,end+1).map(x=>x.l)),k=hh===ll?50:100*(a[end].c-ll)/(hh-ll);st=k<20?1:k>80?-1:0}
+ put('stoch',st,st>0?'Stochastic внизу диапазона':st<0?'Stochastic вверху диапазона':'');
+ let candle=0;if(i>=1){let x=a[end],p=a[end-1],body=Math.abs(x.c-x.o),range=Math.max(1e-12,x.h-x.l),lower=Math.min(x.o,x.c)-x.l,upper=x.h-Math.max(x.o,x.c);
+  candle=(x.c>x.o&&p.c<p.o&&x.c>=p.o&&x.o<=p.c)?1:(x.c<x.o&&p.c>p.o&&x.c<=p.o&&x.o>=p.c)?-1:(lower>body*1.8&&upper<body&&x.c>x.o?1:upper>body*1.8&&lower<body&&x.c<x.o?-1:0)
+ }
+ put('candle',candle,candle>0?'Свечное подтверждение BUY':candle<0?'Свечное подтверждение SELL':'');
+ let mom=i>=5?(c[i]>c[i-5]?1:c[i]<c[i-5]?-1:0):0;
+ put('momentum',mom,mom>0?'Momentum положительный':mom<0?'Momentum отрицательный':'');
+ let bulls=Object.values(votes).filter(x=>x>0).length,bears=Object.values(votes).filter(x=>x<0).length;
+ return {bulls,bears,reasons,enabled:enabled.length,signal:enabled.length&&bulls>=Number($('threshold').value)&&bulls>bears?'UP':enabled.length&&bears>=Number($('threshold').value)&&bears>bulls?'DOWN':'ПРОПУСК'};
+}
+function render(){
+ if(!data.length){$('signal').textContent='ПРОПУСК';$('reason').textContent='Нет данных';return}
+ let bars=Number($('bars').value);
+ if(data.length<bars){$('signal').textContent='ПРОПУСК';$('reason').textContent=`Нужно минимум ${bars} закрытых свечей, сейчас ${data.length}.`;return}
+ let r=calc(data,data.length-1);$('signal').textContent=r.signal;$('signal').className='big '+(r.signal==='UP'?'good':r.signal==='DOWN'?'bad':'');
+ $('reason').textContent=r.reasons.join(' · ')||'Нет достаточного совпадения стратегий.';
+ $('bull').textContent=r.bulls;$('bear').textContent=r.bears;$('count').textContent=data.length;$('status').textContent='История загружена';
+ backtest();
+}
+function backtest(){
+ let n=0,w=0,sk=0;
+ for(let i=100;i<data.length-1;i++){
+  let r=calc(data,i);if(r.signal==='ПРОПУСК'){sk++;continue}
+  n++;let next=data[i+1];if((r.signal==='UP'&&next.c>next.o)||(r.signal==='DOWN'&&next.c<next.o))w++;
+ }
+ $('trades').textContent=n;$('wins').textContent=w;$('rate').textContent=n?(100*w/n).toFixed(1)+'%':'—';$('skips').textContent=sk;
+ $('testmsg').textContent=n<30?'Мало сигналов для оценки: желательно не менее 200 проверок на отдельном участке истории.':'Историческая доля совпадений рассчитана. Проверь отдельно на новых данных и учитывай выплату/задержку.';
+}
+$('load').onclick=()=>{let raw=parseCSV($('csv').value);if(!$('closed').checked)raw.pop();data=raw;render()};
+$('file').onchange=async e=>{$('csv').value=await e.target.files[0].text();};
+$('demo').onclick=()=>{let lines=['time,open,high,low,close'],v=1.08;for(let i=0;i<220;i++){let d=(Math.sin(i/7)*.0005)+(i%17<11?.00008:-.00007),o=v,c=v+d,h=Math.max(o,c)+Math.abs(d)*.5+.00008,l=Math.min(o,c)-Math.abs(d)*.5-.00008;lines.push(`${i},${o},${h},${l},${c}`);v=c} $('csv').value=lines.join('\n');$('closed').checked=true;data=parseCSV($('csv').value);render();$('testmsg').textContent='Это искусственные тестовые свечи, не реальные котировки и не доказательство прибыльности.'};
+document.querySelectorAll('[data-s],#threshold,#bars').forEach(x=>x.addEventListener('change',render));
+</script></body></html>
